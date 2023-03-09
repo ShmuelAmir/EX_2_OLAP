@@ -28,8 +28,12 @@ C <- B %>%
     group_by(date = as.Date(DateTime)) %>%
     summarise(mean_net_generation = mean(Total_net_generation))
 
+pdf('output/Week3_power.pdf')
+
 ggplot(C, aes(x = date, y = mean_net_generation)) +
   geom_line() +
   labs(x = "Day", y = "Mean Net generation") +
-  scale_x_date(date_labels = "%d", date_breaks = "1 day")
+  scale_x_date(date_labels = "%d", date_breaks = "1 day") +
+  ggtitle("Mean daily power generation across US, 7-14 Feb")
 
+dev.off()
