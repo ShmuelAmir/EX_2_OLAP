@@ -61,22 +61,16 @@ ggplot(C, aes(x = Date, y = Mean_Power), xla) +
 # combine east coast power demand 
 D <- B %>%
   mutate(east_coast_demand = Demand.9 + Demand.7 + Demand.5 + Demand.4 + Demand.2) %>%
-  group_by(Hour) %>%
+  mutate(hour_as_num = as.numeric(Hour)) %>%
+  mutate(Day_or_night = case_when(hour_as_num >= 10 & hour_as_num <= 18 ~ "Day",
+                                  hour_as_num >= 20 | hour_as_num <= 3 ~ "Night")) %>%
+  filter(Day_or_night == "Day" | Day_or_night == "Night") %>%
+  group_by(Date, Day_or_night) %>%
   summarize(minut_power_demand = sum(east_coast_demand))
-
-D.day <- D %>%
-  filter(as.numeric(Hour) >= 10 & as.numeric(Hour) <= 18)
-
-D.night <- D %>%
-  filter(as.numeric(Hour) >= 20 | as.numeric(Hour) <= 3)
-
-ggplot(D.day, aes(x = Hour, y = minut_power_demand)) +
+  
+ggplot(D, aes(x = Date, y = minut_power_demand)) +
   geom_point() +
-  geom_line()
-
-ggplot(D.night, aes(x = Hour, y = minut_power_demand)) +
-  geom_point() +
-  geom_line()
-
+  geom_smooth(method = "lm", formula = y ~ x, se=FALSE) +
+  facet_wrap(~ Day_or_night)
 
 #dev.off()
