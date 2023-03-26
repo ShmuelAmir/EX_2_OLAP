@@ -1,22 +1,24 @@
 library(dplyr)
 library(ggplot2)
-#library(plotly)
-#library(lubridate)
 
-#pdf('output/Week3_power.pdf')
-
+pdf('output/Week3_power.pdf')
+Sys.setlocale("LC_TIME", "English")
 
 # ---------- INPUT DATA ---------- #
 
 A <- read.delim('data/table.tsv')
 
-# add more readable DateTime columns,
-# individual columns for date and hour
+# add columns: DateTime, Date and Hour,
+# select only to be used columns,
 # filter to the week of 7 - 14 Feb. 2021,
 # and order by DateTime
 B <- A %>%
   mutate(DateTime = as.POSIXct(megawatthours, tz = "EST", format = "%H:%M EST %m/%d/%Y")) %>%
   mutate(Date = as.Date(DateTime), Hour = format(DateTime, format = "%H")) %>%
+  select(Date, Hour, DateTime, 
+         starts_with("Net.generation"),
+         Demand.9, Demand.7, Demand.5, Demand.4, Demand.2
+        ) %>%
   filter(Date >= as.Date("2021-02-07"),
          Date <= as.Date("2021-02-13")) %>%
   arrange(DateTime)
@@ -24,7 +26,8 @@ B <- A %>%
   
 # ---------- Q1 ---------- #
 
-# Date vs mean of total net generation
+# sum Net.generation across US
+# and calculate the mean for every day
 C <- B %>%
   mutate(Total.net.generation = 
          Net.generation +
@@ -42,7 +45,8 @@ C <- B %>%
   group_by(Date) %>%
   summarize(Mean_Power = mean(Total.net.generation))
 
-ggplot(C, aes(x = Date, y = Mean_Power), xla) +
+# draw the chart with the regeneration line.
+ggplot(C, aes(x = Date, y = Mean_Power)) +
   xlab("Date (7-14 Feb)") +
   ylab("Mean Net Generation") +
   geom_line() + 
@@ -52,25 +56,45 @@ ggplot(C, aes(x = Date, y = Mean_Power), xla) +
 
 
 # ---------- Q2 ---------- #
-# גרף אחד ליום וגרף אחד ללילה לפי דקות. רק לשבוע הנ"ל.
-# להכל צריך את נוסחת הרגרסיה
-# data.frame חדש
-# cube = matrix
 
-
-# combine east coast power demand 
+# combine east coast power demand columns
+# and sum the demand for each date 
+# for day and night.
 D <- B %>%
   mutate(east_coast_demand = Demand.9 + Demand.7 + Demand.5 + Demand.4 + Demand.2) %>%
   mutate(hour_as_num = as.numeric(Hour)) %>%
   mutate(Day_or_night = case_when(hour_as_num >= 10 & hour_as_num <= 18 ~ "Day",
                                   hour_as_num >= 20 | hour_as_num <= 3 ~ "Night")) %>%
-  filter(Day_or_night == "Day" | Day_or_night == "Night") %>%
-  group_by(Date, Day_or_night) %>%
+  filter(Day_or_night %in% c("Day", "Night")) %>%
+  group_by(hour_as_num, Day_or_night) %>%
   summarize(minut_power_demand = sum(east_coast_demand))
-  
-ggplot(D, aes(x = Date, y = minut_power_demand)) +
-  geom_point() +
-  geom_smooth(method = "lm", formula = y ~ x, se=FALSE) +
-  facet_wrap(~ Day_or_night)
 
-#dev.off()
+# find linear line for day and night
+D.day <- filter(D, Day_or_night == "Day")
+D.night <- filter(D, Day_or_night == "Night")
+
+coef_lm.day <- coef(lm(minut_power_demand ~ hour_as_num, data = D.day[1:8, ])) # remove outliers
+intercept.day <- coef_lm.day[1]
+slope.day <- coef_lm.day[2]
+
+coef_lm.night <- coef(lm(minut_power_demand ~ factor(hour_as_num, levels = c(10:23, 0:3)), data = D.night))
+intercept.night <- coef_lm.night[1]
+slope.night <- coef_lm.night[2]
+
+# draw the charts with the regeneration line.
+ggplot(D.day, aes(x = hour_as_num, y = minut_power_demand)) +
+  xlab("Time") +
+  ylab("Demand") + 
+  ggtitle("Minute power demand in the east coast - Day") +
+  geom_point() +
+  geom_abline(intercept = intercept.day, slope = slope.day)
+
+ggplot(D.night, aes(x = factor(hour_as_num, levels = c(10:23, 0:3)), y = minut_power_demand)) +
+  xlab("Time") +
+  ylab("Demand") + 
+  ggtitle("Minute power demand in the east coast - Night") +
+  geom_point() +
+  geom_abline(intercept = intercept.night, slope = slope.night)
+
+
+dev.off()
