@@ -69,14 +69,14 @@ U <- matrix(c(rep(1, length(weekOfFeb)), seq(1, length(weekOfFeb))), ncol = 2)
 U_T <- t(U)
 
 mtx <- solve(U_T %*% U) %*% U_T 
-plot(1, type="n", xlab="", ylab="", xlim = c(0,12), ylim=c(-2, 2))
-for ( i in 1:length(M) ) {
-  LM <- a %*% norm.electric_cube[,i]
 
-  a <- LM[[1]]
-  b <- LM[[2]]
+plot(1, type="n", xlab="", ylab="")
+result <- list(rep(0, length(M)))
+
+for ( i in 1:length(M) ) {
+  result[[i]] <- mtx %*% dice.electric_cube[,i]
   
-  abline(a, b, col = i, lw =2)
+  abline(result[[i]][1], result[[i]][2], col = i, lw =2)
 }
 
 
