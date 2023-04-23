@@ -3,6 +3,7 @@ library(ggplot2)
 library(lubridate)
 
 # pdf('output/Week3_power.pdf')
+
 Sys.setlocale("LC_TIME", "English")
 
 
