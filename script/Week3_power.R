@@ -1,7 +1,7 @@
 library(dplyr)
 library(ggplot2)
 
-pdf('output/Week3_power.pdf')
+#pdf('output/Week3_power.pdf')
 Sys.setlocale("LC_TIME", "English")
 
 # ---------- INPUT DATA ---------- #
