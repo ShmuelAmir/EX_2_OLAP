@@ -2,9 +2,40 @@ library(dplyr)
 library(ggplot2)
 library(lubridate)
 
-# pdf('output/Week3_power.pdf')
+pdf('output/Week3_power.pdf')
 
 Sys.setlocale("LC_TIME", "English")
+
+
+# ---------- functions ---------- #
+
+# matrix linear model
+mtx_lm <- function(dim, data_cube, len) {
+  dim_len <- length(dim)
+  
+  # ---------- Estimate means, variance ---------- #
+  M <- as.list(setNames(rep(NA, dim_len), dim))
+  S <- as.list(setNames(rep(NA, dim_len), dim))
+  
+  for ( i in 1:length(M) ) {
+    M[[ i ]] <- mean( data_cube[  ,i ] )
+    S[[ i ]] <- sd( data_cube[ , i ] )
+  }
+  
+  # ---------- Calculate regression fit ---------- #
+  U <- matrix(c(rep(1, len), seq(1, len)), ncol = 2)
+  U_T <- t(U)
+  
+  mtx <- solve(U_T %*% U) %*% U_T 
+  
+  result <- list(rep(0, length(M)))
+  
+  for ( i in 1:dim_len ) {
+    result[[i]] <- mtx %*% data_cube[,i]
+  }
+  
+  return(result)
+}
 
 
 # ---------- Load the data ---------- #
@@ -14,6 +45,7 @@ origianl_data_frame <- read.delim("data/table.tsv")
 
 # ---------- Rearrange the data ---------- #
 
+# rows to columns
 df_list <- lapply(0:10, function(i) {
   start_idx <- i * 5 + 3
   end_idx <- start_idx + 3
@@ -42,186 +74,97 @@ electric_fact <- electric_fact %>%
 
 # ---------- Estimate means, variance ---------- #
 
+# create a data cube
 electric_cube <-
   tapply(electric_fact$Net.generation,
-    electric_fact[, c("Date", "location")],
+    electric_fact[, c("DateTime", "location")],
     FUN = function(x) sum = sum(x, na.rm = TRUE)
   )
 
-weekOfFeb <- c("2021-02-07", "2021-02-08", "2021-02-09", "2021-02-10", "2021-02-11", "2021-02-12", "2021-02-13")
+# adjust times: -3 and -1 by moving the cells
+for (loc in c("PACW", "CISO", "BPAT")) {
+  electric_cube[, loc] <- c(electric_cube[seq(4, length(electric_cube[, loc])), loc], NA, NA, NA)
+}
 
-dice.electric_cube <- electric_cube[weekOfFeb, ]
+for (loc in c("MISO", "ERCO")) {
+  electric_cube[, loc] <- c(electric_cube[seq(2, length(electric_cube[, loc])), loc], NA)
+}
 
+# rollup by date
+new_df <- data.frame(DateTime = row.names(electric_cube), electric_cube, check.names = FALSE) %>% 
+  mutate(Date = as.Date(DateTime)) %>% 
+  select(-DateTime) %>% 
+  group_by(Date) %>% 
+  summarise_all(sum)
+  
+rollup.electric_cube <- as.matrix(new_df[, -1])
+rownames(rollup.electric_cube) <- as.character(new_df$Date)
+colnames(rollup.electric_cube) <- names(new_df)[-1]
+
+weekOfFeb <- c("2021-02-07", "2021-02-08", "2021-02-09", "2021-02-10", "2021-02-11", "2021-02-12", "2021-02-13", "2021-02-14")
+
+slice.rollup.electric_cube <- rollup.electric_cube[weekOfFeb, ]
+
+
+# ---------- print the intercept and slope of linear model ---------- #
 locations <- unique(electric_fact[,"location"])
 
-M <- as.list(setNames(rep(NA, length(locations)), locations))
-S <- as.list(setNames(rep(NA, length(locations)), locations))
-
-for ( i in 1:length(M) ) {
-  M[[ i ]] <- mean( dice.electric_cube[  ,i ] )
-  S[[ i ]] <- sd( dice.electric_cube[ , i ] )
-}
-
-norm.electric_cube <- t( (t(dice.electric_cube) - unlist(M)) / unlist(S) )
-
-# ---------- Calculate regression fit ---------- #
-
-U <- matrix(c(rep(1, length(weekOfFeb)), seq(1, length(weekOfFeb))), ncol = 2)
-U_T <- t(U)
-
-mtx <- solve(U_T %*% U) %*% U_T 
-
-plot(1, type="n", xlab="", ylab="")
-result <- list(rep(0, length(M)))
-
-for ( i in 1:length(M) ) {
-  result[[i]] <- mtx %*% dice.electric_cube[,i]
-  
-  abline(result[[i]][1], result[[i]][2], col = i, lw =2)
-}
+print("regression fit: ")
+print(mtx_lm(locations, slice.rollup.electric_cube, length(weekOfFeb)))
 
 
-# ggplot(q1, aes(Date, mean.net.generation, color = location)) +
-#  geom_point() +
-#  geom_smooth(method = "lm", formula = y ~ x, se=FALSE) +
-#  facet_wrap(~ location, ncol = 2, scales = "free_y") +
-#  theme(legend.position="bottom")
+# ---------- Chart - date to net.generation and mean line ---------- #
 
-
-# ========== Question 2 ========== #
-
-q2 <- slice.electric_data_frame %>%
-  filter(location %in% c("PJM", "NYIS", "ISNE", "FPL", "CPLE")) %>%
-  mutate(hour_as_num = as.numeric(Hour)) %>%
-  mutate(Day_or_night = case_when(
-    hour_as_num >= 10 & hour_as_num <= 18 ~ "Day",
-    hour_as_num >= 20 | hour_as_num <= 3 ~ "Night"
-  )) %>%
-  filter(Day_or_night %in% c("Day", "Night")) %>%
-  group_by(hour_as_num, Day_or_night) %>%
-  summarize(minut_power_demand = sum(Demand, na.rm = T))
-
-ggplot(q2, aes(hour_as_num, minut_power_demand)) +
-  geom_point() +
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
-  facet_wrap(~Day_or_night, scales = "free")
-
-
-
-
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
-
-slice.electric_data_frame <- electric_data_frame %>%
-  mutate(DateTime = as.POSIXct(megawatthours, tz = "EST", format = "%H:%M EST %m/%d/%Y")) %>%
-  mutate(Date = as.Date(DateTime), Hour = format(DateTime, format = "%H")) %>%
-  select(
-    Date, Hour, DateTime,
-    starts_with("Net.generation"),
-    Demand.9, Demand.7, Demand.5, Demand.4, Demand.2
-  ) %>%
-  filter(Date >= as.Date("2021-02-07"), Date <= as.Date("2021-02-13")) %>%
-  arrange(DateTime)
-
-net.generation.names.list <- as.list(
-  sapply(names(slice.electric_data_frame)[4:14], function(x) x <- NA)
-)
-
-net.generation.df <- slice.electric_data_frame %>%
-  select("Date", starts_with("Net.generation"))
-
-rollup.net.generation.df <- net.generation.df %>%
-  group_by(Date) %>%
-  summarise_at(names(net.generation.names.list), mean)
-
-
-electric_fact <- as.matrix(rollup.net.generation.df[, -1])
-
-# mean values
-M <- net.generation.names.list
-# standard deviations
-S <- net.generation.names.list
-# linear fit
-LM <- net.generation.names.list
-
-# calculate means and stdev
-for (i in 1:length(names(net.generation.names.list))) {
-  curr.net.generation <- electric_fact[, i]
-  M[[i]] <- mean(curr.net.generation)
-  S[[i]] <- sd(curr.net.generation)
-}
-
-# scale and center the consumption series (normalize)
-norm.electric_fact <- t((t(electric_fact) - unlist(M)) / unlist(S))
-
-electric_cube <- data.frame(rollup.net.generation.df[, "Date"], norm.electric_fact)
-
-ggplot(electric_cube, aes(x = Date, y = )) +
-  geom_point()
-
-# לתקן את אזור הזמן  ??????????
-# add columns: DateTime, Date and Hour,
-# select only to be used columns,
-# filter to the week of 7 - 14 Feb. 2021,
-# and order by DateTime
-B <- A %>%
-  mutate(DateTime = as.POSIXct(megawatthours, tz = "EST", format = "%H:%M EST %m/%d/%Y")) %>%
-  mutate(Date = as.Date(DateTime), Hour = format(DateTime, format = "%H")) %>%
-  select(
-    Date, Hour, DateTime,
-    starts_with("Net.generation"),
-    Demand.9, Demand.7, Demand.5, Demand.4, Demand.2
-  ) %>%
-  filter(
-    Date >= as.Date("2021-02-07"), # slice
-    Date <= as.Date("2021-02-13")
-  ) %>%
-  arrange(DateTime)
-
-
-# ---------- Q1 ---------- #
-
-# sum Net.generation across US
-# and calculate the mean for every day
-C <- B %>%
-  mutate(
-    Total.net.generation =
-      Net.generation +
-        Net.generation.1 +
-        Net.generation.2 +
-        Net.generation.3 +
-        Net.generation.4 +
-        Net.generation.5 +
-        Net.generation.6 +
-        Net.generation.7 +
-        Net.generation.8 +
-        Net.generation.9 +
-        Net.generation.10
-  ) %>%
-  group_by(Date) %>%
-  summarize(Mean_Power = mean(Total.net.generation))
-
-# draw the chart with the regeneration line.
-ggplot(C, aes(x = Date, y = Mean_Power)) +
+electric_fact %>% 
+  select(Date, Net.generation) %>% 
+  filter(Date %in% as.Date(weekOfFeb)) %>%
+  group_by(Date)%>% 
+  summarize(means = mean(Net.generation)) %>%
+ggplot(aes(Date, means)) +
   xlab("Date (7-14 Feb)") +
   ylab("Mean Net Generation") +
   geom_line() +
   ggtitle("Mean daily power generation") +
   geom_point() +
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE)
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  scale_x_date(date_breaks = "1 day")
 
 
-# ---------- Q2 ---------- #
+# ========== Question 2 ========== # רגרסיה רק לשאלה 2 להעביר לחישוב מטריצות להראות נוסחה שיעבוד לפי דקה
+#  חישוב נפרד לכל תחום של שעות (שעות לפי אינדקס?)
+
+east_coast <- c("PJM", "NYIS", "ISNE", "FPL", "CPLE")
+day <- c("10", "11", "12", "13", "14", "15", "16", "17", "18")
+night <- c("00", "01", "02", "03", "20", "21", "22", "23")
+
+# create a data cube  !!!!!!!!!!!!pivot
+demand_cube <-
+  tapply(electric_fact$Demand,
+         electric_fact[, c("DateTime", "Hour", "location")],
+         FUN = function(x) sum = sum(x, na.rm = TRUE)
+  )
+
+drilldown.demand_cube <- apply(
+  demand_cube, 
+  c("Hour", "location"), 
+  FUN = function(x) sum(x, na.rm = TRUE)
+)
+
+dice.drilldown.demand_cube <- drilldown.demand_cube[c(day, night), east_coast]
+day_demand_cube <- dice.drilldown.demand_cube[day,]
+night_demand_cube <- dice.drilldown.demand_cube[night,]
+
+mtx_lm(east_coast, day_demand_cube, length(day))
+mtx_lm(east_coast, night_demand_cube, length(night))
+
+
+par(mfrow=c(1,2))
 
 # combine east coast power demand columns
 # and sum the demand for each date
 # for day and night.
-D <- B %>%
-  mutate(east_coast_demand = Demand.9 + Demand.7 + Demand.5 + Demand.4 + Demand.2) %>%
+east_coast_electric_fact <- electric_fact %>%
+  filter(location %in% east_coast) %>%
   mutate(hour_as_num = as.numeric(Hour)) %>%
   mutate(Day_or_night = case_when(
     hour_as_num >= 10 & hour_as_num <= 18 ~ "Day",
@@ -229,11 +172,11 @@ D <- B %>%
   )) %>%
   filter(Day_or_night %in% c("Day", "Night")) %>%
   group_by(hour_as_num, Day_or_night) %>%
-  summarize(minut_power_demand = sum(east_coast_demand))
+  summarize(minut_power_demand = sum(Demand, na.rm = TRUE))
 
 # find linear line for day and night
-D.day <- filter(D, Day_or_night == "Day")
-D.night <- filter(D, Day_or_night == "Night")
+D.day <- filter(east_coast_electric_fact, Day_or_night == "Day")
+D.night <- filter(east_coast_electric_fact, Day_or_night == "Night")
 
 # remove outliers (if D.day[:7,] the correlation increases even more)
 coef_lm.day <- coef(lm(minut_power_demand ~ hour_as_num, data = D.day[1:8, ]))
