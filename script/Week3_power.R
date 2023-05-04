@@ -1,41 +1,14 @@
 library(dplyr)
 library(ggplot2)
 library(lubridate)
+library(grid)
+library(gridExtra)
+library(stringr)
+
 
 pdf('output/Week3_power.pdf')
 
 Sys.setlocale("LC_TIME", "English")
-
-
-# ---------- functions ---------- #
-
-# matrix linear model
-mtx_lm <- function(dim, data_cube, len) {
-  dim_len <- length(dim)
-  
-  # ---------- Estimate means, variance ---------- #
-  M <- as.list(setNames(rep(NA, dim_len), dim))
-  S <- as.list(setNames(rep(NA, dim_len), dim))
-  
-  for ( i in 1:length(M) ) {
-    M[[ i ]] <- mean( data_cube[  ,i ] )
-    S[[ i ]] <- sd( data_cube[ , i ] )
-  }
-  
-  # ---------- Calculate regression fit ---------- #
-  U <- matrix(c(rep(1, len), seq(1, len)), ncol = 2)
-  U_T <- t(U)
-  
-  mtx <- solve(U_T %*% U) %*% U_T 
-  
-  result <- list(rep(0, length(M)))
-  
-  for ( i in 1:dim_len ) {
-    result[[i]] <- mtx %*% data_cube[,i]
-  }
-  
-  return(result)
-}
 
 
 # ---------- Load the data ---------- #
@@ -78,7 +51,7 @@ electric_fact <- electric_fact %>%
 electric_cube <-
   tapply(electric_fact$Net.generation,
     electric_fact[, c("DateTime", "location")],
-    FUN = function(x) sum = sum(x, na.rm = TRUE)
+    FUN = function(x) sum(x, na.rm = TRUE)
   )
 
 # adjust times: -3 and -1 by moving the cells
@@ -106,15 +79,23 @@ weekOfFeb <- c("2021-02-07", "2021-02-08", "2021-02-09", "2021-02-10", "2021-02-
 slice.rollup.electric_cube <- rollup.electric_cube[weekOfFeb, ]
 
 
-# ---------- print the intercept and slope of linear model ---------- #
-locations <- unique(electric_fact[,"location"])
-
-print("regression fit: ")
-print(mtx_lm(locations, slice.rollup.electric_cube, length(weekOfFeb)))
-
-
 # ---------- Chart - date to net.generation and mean line ---------- #
 
+means <- apply(slice.rollup.electric_cube, 1, mean)
+
+plot_df <- data.frame(date = as.Date(weekOfFeb), mean.net.generation = means)
+
+# mean of sum
+ggplot(plot_df, aes(date, mean.net.generation)) +
+  xlab("Date (7-14 Feb)") +
+  ylab("Mean Net Generation") +
+  geom_line() +
+  ggtitle("Mean daily power generation") +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE) +
+  scale_x_date(date_breaks = "1 day")
+
+# mean across all
 electric_fact %>% 
   select(Date, Net.generation) %>% 
   filter(Date %in% as.Date(weekOfFeb)) %>%
@@ -135,9 +116,10 @@ ggplot(aes(Date, means)) +
 
 east_coast <- c("PJM", "NYIS", "ISNE", "FPL", "CPLE")
 day <- c("10", "11", "12", "13", "14", "15", "16", "17", "18")
-night <- c("00", "01", "02", "03", "20", "21", "22", "23")
+night <- c("20", "21", "22", "23", "0", "1", "2", "3")
+night_pad_zero <- str_pad(night, 2, pad = 0)
 
-# create a data cube  !!!!!!!!!!!!pivot
+# create a data cube
 demand_cube <-
   tapply(electric_fact$Demand,
          electric_fact[, c("DateTime", "Hour", "location")],
@@ -150,60 +132,52 @@ drilldown.demand_cube <- apply(
   FUN = function(x) sum(x, na.rm = TRUE)
 )
 
-dice.drilldown.demand_cube <- drilldown.demand_cube[c(day, night), east_coast]
-day_demand_cube <- dice.drilldown.demand_cube[day,]
-night_demand_cube <- dice.drilldown.demand_cube[night,]
+dice.drilldown.demand_cube <- drilldown.demand_cube[c(day, night_pad_zero), east_coast]
 
-mtx_lm(east_coast, day_demand_cube, length(day))
-mtx_lm(east_coast, night_demand_cube, length(night))
+sum_by_hour <- apply(dice.drilldown.demand_cube, 1, sum)
+day_demand <- sum_by_hour[day]
+night_demand <- sum_by_hour[night_pad_zero]
 
 
-par(mfrow=c(1,2))
+# ---------- Calculate regression fit ---------- #
 
-# combine east coast power demand columns
-# and sum the demand for each date
-# for day and night.
-east_coast_electric_fact <- electric_fact %>%
-  filter(location %in% east_coast) %>%
-  mutate(hour_as_num = as.numeric(Hour)) %>%
-  mutate(Day_or_night = case_when(
-    hour_as_num >= 10 & hour_as_num <= 18 ~ "Day",
-    hour_as_num >= 20 | hour_as_num <= 3 ~ "Night"
-  )) %>%
-  filter(Day_or_night %in% c("Day", "Night")) %>%
-  group_by(hour_as_num, Day_or_night) %>%
-  summarize(minut_power_demand = sum(Demand, na.rm = TRUE))
+day.U <- matrix(c(rep(1, 9), seq(0, 9-1)), ncol = 2)
+night.U <- matrix(c(rep(1, 8), seq(0, 8-1)), ncol = 2)
 
-# find linear line for day and night
-D.day <- filter(east_coast_electric_fact, Day_or_night == "Day")
-D.night <- filter(east_coast_electric_fact, Day_or_night == "Night")
+day.U_T <- t(day.U)
+night.U_T <- t(night.U)
 
-# remove outliers (if D.day[:7,] the correlation increases even more)
-coef_lm.day <- coef(lm(minut_power_demand ~ hour_as_num, data = D.day[1:8, ]))
-intercept.day <- coef_lm.day[1]
-slope.day <- coef_lm.day[2]
+day.result <- solve(day.U_T %*% day.U) %*% day.U_T %*% day_demand
+night.result <- solve(night.U_T %*% night.U) %*% night.U_T %*% night_demand
 
-coef_lm.night <- coef(lm(
-  minut_power_demand ~ factor(hour_as_num, levels = c(10:23, 0:3)),
-  data = D.night
-))
-intercept.night <- coef_lm.night[1]
-slope.night <- coef_lm.night[2]
 
-# draw the charts with the regeneration line.
-ggplot(D.day, aes(x = hour_as_num, y = minut_power_demand)) +
-  xlab("Time") +
+# day
+intercept.day <- day.result[1]
+slope.day <- day.result[2]
+
+day_demand_df <- data.frame(hours = day, demand = day_demand)
+
+day_plot <- ggplot(day_demand_df, aes(hours, demand)) +
+  xlab("Hours") +
   ylab("Demand") +
-  ggtitle("Minute power demand in the east coast - Day") +
+  ggtitle("Day") +
   geom_point() +
   geom_abline(intercept = intercept.day, slope = slope.day)
 
-ggplot(D.night, aes(x = factor(hour_as_num, levels = c(10:23, 0:3)), y = minut_power_demand)) +
-  xlab("Time") +
+
+# night
+intercept.night <- night.result[1]
+slope.night <- night.result[2]
+
+night_demand_df <- data.frame(hours = night, demand = night_demand)
+
+night_plot <- ggplot(night_demand_df, aes(factor(night, levels = c(10:23, 0:3)), demand)) +
+  xlab("Hours") +
   ylab("Demand") +
-  ggtitle("Minute power demand in the east coast - Night") +
+  ggtitle("Night") +
   geom_point() +
   geom_abline(intercept = intercept.night, slope = slope.night)
 
+grid.arrange(day_plot, night_plot, ncol = 2, top = textGrob("Minute power demand in the east coast"))
 
 dev.off()
