@@ -1,0 +1,198 @@
+> source("C:/Users/shmulik/Desktop/הנדסת תוכנה/שנה ג - תשפג/סמסטר ב/BIG DATA - נתוני עתק/תרגילים/EX_2_OLAP/script/Week3_power.R", echo=TRUE)
+
+> # 316392323 Shmuel Amir
+> # GitHub link: https://github.com/ShmuelAmir/EX_2_OLAP
+> 
+> library(dplyr)
+
+> library(ggplot2)
+
+> library(lubridate)
+
+> library(grid)
+
+> library(gridExtra)
+
+> library(stringr)
+
+> library(tidyverse)
+
+> pdf('output/Week3_power.pdf')
+
+> Sys.setlocale("LC_TIME", "English")
+[1] "English_United States.1252"
+
+> # ---------- Load the data ---------- #
+> 
+> origianl_data_frame <- read.delim("data/table.tsv")
+
+> # ---------- Rearrange the data ---------- #
+> 
+> # rows to columns
+> df_list <- lapply(0:10, function(i) {
++   start_idx <- i * 5 + 3
++   end_idx < .... [TRUNCATED] 
+
+> electric_fact <- do.call(rbind, df_list)
+
+> electric_fact <- electric_fact %>%
++   mutate(
++     DateTime = as.POSIXct(
++       megawatthours,
++       tz = "EST",
++       format = "%H:%M EST % ..." ... [TRUNCATED] 
+
+> # ========== Question 1 ========== #
+> 
+> # ---------- Estimate means, variance ---------- #
+> 
+> # create a data cube
+> electric_cube <-
++   tapply .... [TRUNCATED] 
+
+> # adjust times: -3 and -1 by moving the cells
+> for (loc in c("PACW", "CISO", "BPAT")) {
++   electric_cube[, loc] <- c(electric_cube[seq(4, length(e .... [TRUNCATED] 
+
+> for (loc in c("MISO", "ERCO")) {
++   electric_cube[, loc] <- c(electric_cube[seq(2, length(electric_cube[, loc])), loc], NA)
++ }
+
+> # rollup by date
+> new_df <- data.frame(DateTime = row.names(electric_cube), electric_cube, check.names = FALSE) %>% 
++   mutate(Date = as.Date(Date .... [TRUNCATED] 
+
+> rollup.electric <- as.matrix(new_df[, -1])
+
+> rownames(rollup.electric) <- as.character(new_df$Date)
+
+> colnames(rollup.electric) <- names(new_df)[-1]
+
+> weekOfFeb <- c("2021-02-07", "2021-02-08", "2021-02-09", "2021-02-10", "2021-02-11", "2021-02-12", "2021-02-13", "2021-02-14")
+
+> slice.rollup.electric <- rollup.electric[weekOfFeb, ]
+
+> # ---------- Chart - date to net.generation and mean line ---------- #
+> 
+> means <- apply(slice.rollup.electric, 1, mean)
+
+> plot_df <- data.frame(date = as.Date(weekOfFeb), mean.net.generation = means)
+
+> electric_fact %>% 
++   select(Date, Net.generation) %>% 
++   filter(Date %in% as.Date(weekOfFeb)) %>%
++   group_by(Date)%>% 
++   summarize(means = m .... [TRUNCATED] 
+
+> str(electric_fact)
+'data.frame':	16896 obs. of  9 variables:
+ $ megawatthours            : chr  "01:00 EST 1/8/2021" "01:00 EST 1/8/2021" "01:00 EST 1/8/2021" "01:00 EST 1/8/2021" ...
+ $ Demand                   : int  6904 25623 7117 40007 9205 12982 73185 15862 2651 91635 ...
+ $ Day.ahead.demand.forecast: int  6828 25273 7562 40444 8699 12180 72715 15287 2711 86005 ...
+ $ Net.generation           : int  13476 13429 8148 40083 9585 10411 69150 13493 1529 94537 ...
+ $ Total.interchange        : int  10747 -11049 1031 76 380 -2571 -4692 -2369 -1122 2905 ...
+ $ location                 : chr  "BPAT" "CISO" "CPLE" "ERCO" ...
+ $ DateTime                 : POSIXct, format: "2021-01-08 01:00:00" "2021-01-08 01:00:00" "2021-01-08 01:00:00" "2021-01-08 01:00:00" ...
+ $ Date                     : Date, format: "2021-01-08" "2021-01-08" "2021-01-08" "2021-01-08" ...
+ $ Hour                     : chr  "01" "01" "01" "01" ...
+
+> # ========== Question 2 ========== #
+> 
+> east_coast <- c("PJM", "NYIS", "ISNE", "FPL", "CPLE")
+
+> day <- c("10", "11", "12", "13", "14", "15", "16", "17", "18")
+
+> night <- c("20", "21", "22", "23", "0", "1", "2", "3")
+
+> night_pad_zero <- str_pad(night, 2, pad = 0)
+
+> # create a data cube
+> demand_cube <- 
++   tapply(electric_fact$Demand,
++          electric_fact[, c("DateTime", "Hour", "location")],
++          FU .... [TRUNCATED] 
+
+> drilldown.demand <- apply(
++   demand_cube, 
++   c("Hour", "location"), 
++   FUN = function(x) sum(x, na.rm = TRUE)
++ )
+
+> dice.drilldown.demand <- drilldown.demand[c(day, night_pad_zero), east_coast]
+
+> day_demand <- dice.drilldown.demand[day,]
+
+> night_demand <- dice.drilldown.demand[night_pad_zero,]
+
+> # ---------- Calculate regression fit ---------- #
+> 
+> # day
+> M <- apply(day_demand, MARGIN = 2, FUN = mean)
+
+> S <- apply(day_demand, MARGIN = 2, FUN = sd)
+
+> morn.day_demand <- t( (t(day_demand) - unlist(M)) / unlist(S) )
+
+> day.U <- matrix(c(rep(1, 9), seq(0, 9-1)), ncol = 2)
+
+> day.U_T <- t(day.U)
+
+> day.result <- solve(day.U_T %*% day.U) %*% day.U_T %*% morn.day_demand
+
+> intercept.day <- day.result[1,]
+
+> slope.day <- day.result[2,]
+
+> plot(1, type="n", main = "Minute power demand in the east coast - Day",
++      xlab = "Hour", ylab = "Normalize demand", xlim = c(0,9), ylim=c(-2, 4 .... [TRUNCATED] 
+
+> axis(side = 1, at = 0:8, labels = day, line = 1 ,tick = FALSE)
+
+> for (i in 1:length(colnames(day_demand))) {
++   DF <- data.frame ( Hour = as.integer(day) - 10, Demand = morn.day_demand[ , i ] )
++   lines( DF, col .... [TRUNCATED] 
+
+> legend( 'topleft', pch = 19,
++         col = seq(1, length(colnames(day_demand))), 
++         legend = paste(colnames(day_demand), " - ", 
++         .... [TRUNCATED] 
+
+> # night
+> M.night <- apply(night_demand, MARGIN = 2, FUN = mean)
+
+> S.night <- apply(night_demand, MARGIN = 2, FUN = sd)
+
+> morn.night_demand <- t( (t(night_demand) - unlist(M.night)) / unlist(S.night) )
+
+> night.U <- matrix(c(rep(1, 8), seq(0, 8-1)), ncol = 2)
+
+> night.U_T <- t(night.U)
+
+> night.result <- solve(night.U_T %*% night.U) %*% night.U_T %*% morn.night_demand
+
+> intercept.night <- night.result[1,]
+
+> slope.night <- night.result[2,]
+
+> plot(1, type="n", main = "Minute power demand in the east coast - Night", 
++      xlab = "Hour", ylab = "Normalize demand", xlim = c(0,8), ylim=c(-2 .... [TRUNCATED] 
+
+> axis(side = 1, at = 0:7, labels = c("20", "21", "22", "23", "00", "01", "02", "03"), line = 1, tick = FALSE)
+
+> for (i in 1:length(colnames(night_demand))) {
++   hour <- if_else(as.integer(night) >= 20, as.integer(night)-20, as.integer(night)+4)
++   DF <- data .... [TRUNCATED] 
+
+> legend( 'topright', pch = 19,
++         col = seq(1, length(colnames(night_demand))), 
++         legend = paste(colnames(night_demand), " - ", 
++    .... [TRUNCATED] 
+
+> # save variables 
+> save(file = 'Week3_power.rdata', 
++   electric_fact, electric_cube, rollup.electric, slice.rollup.electric,
++   demand_cube, dri .... [TRUNCATED] 
+
+> dev.off()
+null device 
+          1 

@@ -278,7 +278,7 @@ print (rollup)
 # find the members of each decade
 up <- cut(as.integer( dimnames(revenue_cube)$year ),
           c(1989, 1999, 2009, 2019, 2029),
-          dig.lab = 5)
+          dig.lab = 4)
 up.group <- split( dimnames(revenue_cube)$year, up )
 n.decade_levels <- length(up.group)
 print (up.group)
